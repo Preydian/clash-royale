@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "lint": "eslint_d . --ext .ts,.tsx,.jsx --cache --cache-location .eslintcache --fix"
+    "lint": "eslint . --cache --cache-location .eslintcache --fix"
   },
   "dependencies": {
     "@eslint/js": "^9.31.0",

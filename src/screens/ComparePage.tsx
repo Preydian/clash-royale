@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { z } from 'zod';
+import { loadTags, saveTags, parseDefaultTags } from '../lib/tags';
 
 const PlayerSchema = z.object({
   tag: z.string(),
@@ -26,9 +27,18 @@ type PlayerResult = {
 
 const ComparePage: React.FC = () => {
   const [inputTag, setInputTag] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>(() => loadTags());
   const [results, setResults] = useState<PlayerResult[]>([]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    saveTags(tags);
+  }, [tags]);
+
+  const resetToDefaults = () => {
+    setTags(parseDefaultTags());
+    setResults([]);
+  };
 
   const addTag = () => {
     const cleanTag = inputTag.trim().toUpperCase();
@@ -57,7 +67,6 @@ const ComparePage: React.FC = () => {
         const res = await fetch(`${base}/api/player/${formatted}`);
 
         if (!res.ok) {
-          console.log(res);
           throw new Error(
             res.status === 404
               ? 'Player Not Found'
@@ -157,6 +166,15 @@ const ComparePage: React.FC = () => {
             </span>
           )}
         </div>
+
+        {parseDefaultTags().length > 0 && (
+          <button
+            onClick={resetToDefaults}
+            className="mt-3 text-xs text-slate-500 hover:text-blue-400 transition-colors underline-offset-2 hover:underline"
+          >
+            Reset to my accounts
+          </button>
+        )}
 
         <button
           onClick={fetchAllStats}
