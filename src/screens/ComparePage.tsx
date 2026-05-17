@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { z } from 'zod';
-import { loadTags, saveTags, parseDefaultTags } from '../lib/tags';
+import { parseDefaultTags } from '../lib/tags';
 
 const PlayerSchema = z.object({
   tag: z.string(),
@@ -27,15 +27,11 @@ type PlayerResult = {
 
 const ComparePage: React.FC = () => {
   const [inputTag, setInputTag] = useState('');
-  const [tags, setTags] = useState<string[]>(() => loadTags());
+  const [tags, setTags] = useState<string[]>([]);
   const [results, setResults] = useState<PlayerResult[]>([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    saveTags(tags);
-  }, [tags]);
-
-  const resetToDefaults = () => {
+  const loadMyAccounts = () => {
     setTags(parseDefaultTags());
     setResults([]);
   };
@@ -169,10 +165,10 @@ const ComparePage: React.FC = () => {
 
         {parseDefaultTags().length > 0 && (
           <button
-            onClick={resetToDefaults}
-            className="mt-3 text-xs text-slate-500 hover:text-blue-400 transition-colors underline-offset-2 hover:underline"
+            onClick={loadMyAccounts}
+            className="mt-4 w-full bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm font-bold transition-colors"
           >
-            Reset to my accounts
+            Load my accounts
           </button>
         )}
 
