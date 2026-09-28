@@ -1,3 +1,58 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Palette: warm paper and ink, with the game's two sides as accents.
+ * Cobalt is you / a win, vermilion is the opponent / a loss. The pair is
+ * checked for colour-blind separation in both themes, and results always
+ * carry a letter or label as well as a colour.
+ * Values are RGB channels so Tailwind's opacity modifiers work.
+ */
+:root {
+  --paper: 242 235 222;
+  --sheet: 250 246 238;
+  --ink: 28 24 19;
+  --ink-soft: 92 82 68;
+  --ink-faint: 125 113 96;
+  --rule: 218 205 182;
+  --cobalt: 35 82 204;
+  --vermilion: 207 63 39;
+  --gold: 194 138 18;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: 21 18 15;
+    --sheet: 31 27 22;
+    --ink: 237 228 211;
+    --ink-soft: 179 166 144;
+    --ink-faint: 138 127 108;
+    --rule: 58 50 41;
+    --cobalt: 108 140 245;
+    --vermilion: 230 90 63;
+    --gold: 233 173 58;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-size: 15px;
+  }
+
+  ::selection {
+    @apply bg-ink text-paper;
+  }
+
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-cobalt;
+  }
+}
+
+@layer components {
+  /* Scoreboard-style label: condensed caps, no letterspacing tricks. */
+  .label {
+    @apply font-display text-[15px] font-bold uppercase leading-none text-ink-soft;
+  }
+}
