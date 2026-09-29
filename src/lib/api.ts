@@ -102,15 +102,26 @@ function describeStatus(status: number): string {
   }
 }
 
-async function clashGet(path: string): Promise<unknown> {
+async function getJson(route: string): Promise<unknown> {
   const base = import.meta.env.VITE_API_BASE ?? '';
-  const res = await fetch(`${base}/api/clash?path=${encodeURIComponent(path)}`);
+  const res = await fetch(`${base}${route}`);
   if (!res.ok) throw new ApiError(res.status, describeStatus(res.status));
   // Something other than the API answered (e.g. a dev server serving files).
   if (!res.headers.get('Content-Type')?.includes('application/json')) {
     throw new ApiError(0, 'The API server didn’t respond with data');
   }
   return res.json();
+}
+
+function clashGet(path: string): Promise<unknown> {
+  return getJson(`/api/clash?path=${encodeURIComponent(path)}`);
+}
+
+function parseBattles(raw: unknown[]): Battle[] {
+  return raw.flatMap((item) => {
+    const result = BattleSchema.safeParse(item);
+    return result.success ? [result.data] : [];
+  });
 }
 
 export async function fetchPlayer(tag: string): Promise<Player> {
@@ -122,11 +133,69 @@ export async function fetchPlayer(tag: string): Promise<Player> {
 export async function fetchBattleLog(tag: string): Promise<Battle[]> {
   const raw = await clashGet(`players/${tag}/battlelog`);
   if (!Array.isArray(raw)) throw new ApiError(0, 'Unexpected battle log data');
+  return parseBattles(raw);
+}
 
-  return raw.flatMap((item) => {
-    const result = BattleSchema.safeParse(item);
-    return result.success ? [result.data] : [];
+const HistoryResponseSchema = z.object({
+  enabled: z.boolean(),
+  tracked: z.boolean().optional(),
+  since: z.string().nullable().optional(),
+  battles: z.array(z.unknown()).optional(),
+  // Card icons are sent once per card id rather than inside every battle.
+  icons: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * `disabled`: no database configured. `untracked`: this tag isn't in
+ * TRACKED_TAGS. `tracked`: stored battles, newest first.
+ */
+export type History =
+  | { status: 'disabled' }
+  | { status: 'untracked' }
+  | { status: 'tracked'; since: Date | null; battles: Battle[] };
+
+/** Stored battles from the last `days` days, or all time when `days` is null. */
+export async function fetchHistory(
+  tag: string,
+  days: number | null,
+): Promise<History> {
+  const params = new URLSearchParams({ tag });
+  if (days !== null) params.set('days', String(days));
+  const result = HistoryResponseSchema.safeParse(
+    await getJson(`/api/history?${params}`),
+  );
+  if (!result.success) throw new ApiError(0, 'Unexpected history data');
+
+  const h = result.data;
+  if (!h.enabled) return { status: 'disabled' };
+  if (!h.tracked) return { status: 'untracked' };
+
+  const icons = h.icons ?? {};
+  const withIcons = (h.battles ?? []).map((b) => {
+    const battle = b as { team?: unknown[]; opponent?: unknown[] };
+    const side = (players: unknown[] = []) =>
+      players.map((p) => {
+        const player = p as { cards?: { id: number }[] };
+        return {
+          ...player,
+          cards: (player.cards ?? []).map((c) => ({
+            ...c,
+            iconUrls: icons[c.id],
+          })),
+        };
+      });
+    return {
+      ...battle,
+      team: side(battle.team),
+      opponent: side(battle.opponent),
+    };
   });
+
+  return {
+    status: 'tracked',
+    since: h.since ? new Date(h.since) : null,
+    battles: parseBattles(withIcons),
+  };
 }
 
 export function errorMessage(err: unknown): string {

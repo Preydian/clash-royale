@@ -133,7 +133,8 @@ export const TrophyChart = ({ points }: { points: TrophyPoint[] }) => {
               strokeWidth={2}
               strokeLinejoin="round"
               strokeLinecap="round"
-              dot={renderDot(4)}
+              // Past ~60 battles every dot is noise; the hover dot still shows.
+              dot={points.length > 60 ? false : renderDot(4)}
               activeDot={renderDot(6)}
               isAnimationActive={false}
             />

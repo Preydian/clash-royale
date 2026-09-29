@@ -254,3 +254,37 @@ export function cycleCost(cards: Card[]): number | null {
   if (costs.length < 8) return null;
   return costs.slice(0, 4).reduce((a, c) => a + c, 0);
 }
+
+/** Union of two newest-first battle lists, without duplicates. */
+export function mergeBattles(a: Battle[], b: Battle[]): Battle[] {
+  const byTime = new Map<string, Battle>();
+  for (const battle of [...a, ...b]) byTime.set(battle.battleTime, battle);
+  // battleTime strings ("20250928T141502.000Z") sort chronologically.
+  return [...byTime.values()].sort((x, y) =>
+    y.battleTime.localeCompare(x.battleTime),
+  );
+}
+
+export type Day = {
+  date: Date;
+  battles: Battle[];
+  record: Record3;
+  trophies: number | null;
+};
+
+/** Battles grouped by the viewer's local calendar day, newest first. */
+export function byDay(battles: Battle[]): Day[] {
+  const days = new Map<string, Battle[]>();
+  for (const b of battles) {
+    const key = battleDate(b).toDateString();
+    const day = days.get(key);
+    if (day) day.push(b);
+    else days.set(key, [b]);
+  }
+  return [...days.entries()].map(([key, dayBattles]) => ({
+    date: new Date(key),
+    battles: dayBattles,
+    record: record(dayBattles),
+    trophies: netTrophies(dayBattles),
+  }));
+}

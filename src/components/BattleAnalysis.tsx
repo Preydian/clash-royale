@@ -7,6 +7,7 @@ import {
   averageElixir,
   averageLevelGap,
   battleDate,
+  byDay,
   deckStats,
   games,
   levelGap,
@@ -36,21 +37,42 @@ const PLURAL: Record<Outcome, string> = {
   draw: 'draws',
 };
 
+const FORM_LENGTH = 40;
+const ROWS_SHOWN = 40;
+
+/**
+ * Everything computed from a list of battles. `controls` sits above the mode
+ * filter (the player page puts the date range there); `stale` dims the content
+ * while a new range loads.
+ */
 export const BattleAnalysis = ({
   battles,
   commonMax,
   lifetimeWinRate,
+  title,
+  aside,
+  controls,
+  showDays = false,
+  stale = false,
 }: {
   battles: Battle[];
   commonMax: number | null;
   lifetimeWinRate: number | null;
+  title: string;
+  aside?: React.ReactNode;
+  controls?: React.ReactNode;
+  showDays?: boolean;
+  stale?: boolean;
 }) => {
-  const [filter, setFilter] = useState<Filter>('all');
+  const [chosen, setFilter] = useState<Filter>('all');
+  const [allRows, setAllRows] = useState(false);
 
   const groups = MODE_GROUPS.map((g) => ({
     ...g,
     count: battles.filter((b) => modeGroup(b) === g.id).length,
   })).filter((g) => g.count > 0);
+  // A mode picked in one date range may not exist in the next.
+  const filter = groups.some((g) => g.id === chosen) ? chosen : 'all';
 
   const shown = useMemo(
     () =>
@@ -59,20 +81,12 @@ export const BattleAnalysis = ({
         : battles.filter((b) => modeGroup(b) === filter),
     [battles, filter],
   );
-
-  if (battles.length === 0) {
-    return (
-      <Section title="Recent battles">
-        <p className="text-ink-soft">No battles in the log yet.</p>
-      </Section>
-    );
-  }
+  const rows = allRows ? shown : shown.slice(0, ROWS_SHOWN);
 
   return (
-    <Section
-      title={`Last ${battles.length} battles`}
-      aside="The API keeps about 25 battles"
-    >
+    <Section title={title} aside={aside}>
+      {controls}
+
       {groups.length > 1 && (
         <div
           role="group"
@@ -97,33 +111,58 @@ export const BattleAnalysis = ({
         </div>
       )}
 
-      <Summary battles={shown} lifetimeWinRate={lifetimeWinRate} />
+      {battles.length === 0 ? (
+        <p className="text-ink-soft">No battles in this range yet.</p>
+      ) : (
+        <div
+          className={`transition-opacity ${stale ? 'opacity-50' : ''}`}
+          aria-busy={stale}
+        >
+          <Summary battles={shown} lifetimeWinRate={lifetimeWinRate} />
 
-      <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-        <div>
-          <p className="label mb-3">Form</p>
-          <FormLine outcomes={[...shown].reverse().map(outcome)} />
-          <p className="mt-2 flex justify-between font-mono text-[11px] text-ink-faint">
-            <span>older</span>
-            <span>latest</span>
-          </p>
+          <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+            {/* Sized to the bars so "latest" sits under the last one. */}
+            <div className="w-fit min-w-0 max-w-full">
+              <p className="label mb-3">
+                Form
+                {shown.length > FORM_LENGTH && ` · last ${FORM_LENGTH}`}
+              </p>
+              <FormLine
+                outcomes={shown.slice(0, FORM_LENGTH).reverse().map(outcome)}
+              />
+              <p className="mt-2 flex justify-between font-mono text-[11px] text-ink-faint">
+                <span>older</span>
+                <span>latest</span>
+              </p>
+            </div>
+            <TrophySection battles={shown} />
+          </div>
+
+          {showDays && <DayByDay battles={shown} />}
+          <Decks battles={shown} />
+          <Matchups battles={shown} />
+
+          <h3 className="label mb-3 mt-12">Battle by battle</h3>
+          <ol className="border-t border-ink">
+            {rows.map((b) => (
+              <BattleRow
+                key={b.battleTime + me(b).tag}
+                battle={b}
+                commonMax={commonMax}
+              />
+            ))}
+          </ol>
+          {rows.length < shown.length && (
+            <button
+              type="button"
+              onClick={() => setAllRows(true)}
+              className="mt-4 border-2 border-ink px-4 py-1.5 font-display text-lg font-bold uppercase transition-colors hover:bg-ink hover:text-paper"
+            >
+              Show all {shown.length} battles
+            </button>
+          )}
         </div>
-        <TrophySection battles={shown} />
-      </div>
-
-      <Decks battles={shown} />
-      <Matchups battles={shown} />
-
-      <h3 className="label mb-3 mt-12">Battle by battle</h3>
-      <ol className="border-t border-ink">
-        {shown.map((b) => (
-          <BattleRow
-            key={b.battleTime + me(b).tag}
-            battle={b}
-            commonMax={commonMax}
-          />
-        ))}
-      </ol>
+      )}
     </Section>
   );
 };
@@ -229,6 +268,73 @@ const TrophySection = ({ battles }: { battles: Battle[] }) => {
   return <TrophyChart points={points} />;
 };
 
+const DAY_FORMAT: Intl.DateTimeFormatOptions = {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+};
+
+/** One row per day played: a session recap. */
+const DayByDay = ({ battles }: { battles: Battle[] }) => {
+  const days = byDay(battles);
+  if (days.length < 2) return null;
+
+  return (
+    <>
+      <h3 className="label mb-3 mt-12">Day by day</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] border-collapse text-left">
+          <thead>
+            <tr className="border-b border-ink">
+              <th scope="col" className="label pb-2 pr-4">
+                Day
+              </th>
+              <th scope="col" className="label pb-2 pr-4 text-right">
+                Battles
+              </th>
+              <th scope="col" className="label pb-2 pr-4 text-right">
+                Record
+              </th>
+              <th scope="col" className="label w-2/5 pb-2 pr-4">
+                Win rate
+              </th>
+              <th scope="col" className="label pb-2 text-right">
+                Trophies
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((d) => (
+              <tr key={d.date.toISOString()} className="border-b border-rule">
+                <td className="py-2 pr-4 text-sm font-semibold">
+                  {d.date.toLocaleDateString(undefined, DAY_FORMAT)}
+                </td>
+                <td className="py-2 pr-4 text-right font-mono text-sm tabular-nums">
+                  {games(d.record)}
+                </td>
+                <td className="py-2 pr-4 text-right font-display text-xl font-bold tabular-nums">
+                  {formatRecord(d.record)}
+                </td>
+                <td className="py-2 pr-4">
+                  <div className="flex items-center gap-3">
+                    <span className="w-10 shrink-0 text-right font-mono text-sm tabular-nums">
+                      {percent(winRate(d.record))}
+                    </span>
+                    <RecordBar record={d.record} />
+                  </div>
+                </td>
+                <td className="py-2 text-right font-mono text-sm tabular-nums">
+                  {d.trophies === null ? '—' : signed(d.trophies)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+};
+
 const Decks = ({ battles }: { battles: Battle[] }) => {
   const decks = deckStats(battles).slice(0, 5);
   if (decks.length === 0) return null;
@@ -244,7 +350,7 @@ const Decks = ({ battles }: { battles: Battle[] }) => {
           >
             <Deck cards={d.cards} compact />
             <div className="flex flex-1 items-center gap-5">
-              <div className="w-20 shrink-0">
+              <div className="min-w-[5rem] shrink-0 whitespace-nowrap">
                 <p className="font-display text-3xl font-extrabold leading-none">
                   {formatRecord(d.record)}
                 </p>
@@ -275,7 +381,7 @@ const Decks = ({ battles }: { battles: Battle[] }) => {
 
 const Matchups = ({ battles }: { battles: Battle[] }) => {
   // Small samples lie; require a card to show up a few times before ranking it.
-  const minFaced = battles.length >= 15 ? 3 : 2;
+  const minFaced = battles.length >= 100 ? 5 : battles.length >= 15 ? 3 : 2;
   const all = matchups(battles).filter((m) => m.faced >= minFaced);
   const rate = (m: Matchup) => m.lost / m.faced;
 

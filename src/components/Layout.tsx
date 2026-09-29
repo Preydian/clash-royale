@@ -38,7 +38,12 @@ export const Stat = ({
 }) => (
   <div className="bg-paper px-3 pb-3 pt-3.5 sm:px-4">
     <dt className="label">{label}</dt>
-    <dd className="mt-2 font-display text-4xl font-extrabold leading-none">
+    <dd
+      className={`mt-2 whitespace-nowrap font-display font-extrabold leading-none ${
+        // Long values like an all-time "164–160–7" record step down a size.
+        String(value).length > 7 ? 'text-3xl' : 'text-4xl'
+      }`}
+    >
       {value}
     </dd>
     {note && <dd className="mt-1.5 text-[13px] text-ink-soft">{note}</dd>}

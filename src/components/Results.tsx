@@ -34,6 +34,7 @@ export const FormLine = ({
   outcomes: Outcome[];
   size?: 'sm' | 'md';
 }) => {
+  // Bars shrink (down to 3px) when there are more than fit the width.
   const width = size === 'sm' ? 'w-[5px]' : 'w-2';
   const height = size === 'sm' ? 'h-2.5' : 'h-4';
   const summary = outcomes.map((o) => OUTCOME_LETTER[o]).join(' ');
@@ -42,10 +43,10 @@ export const FormLine = ({
     <div
       role="img"
       aria-label={`Results, oldest to latest: ${summary}`}
-      className="flex items-center gap-[3px]"
+      className="flex items-center gap-[2px] sm:gap-[3px]"
     >
       {outcomes.map((o, i) => (
-        <span key={i} className={`flex flex-col ${width}`}>
+        <span key={i} className={`flex min-w-[3px] flex-col ${width}`}>
           <span className={`${height} ${o === 'win' ? 'bg-cobalt' : ''}`} />
           <span
             className={`h-px ${o === 'draw' ? 'bg-ink' : 'bg-ink-faint'}`}
