@@ -1,344 +1,298 @@
-import React, { useState, useMemo } from 'react';
-import { z } from 'zod';
-import { parseDefaultTags } from '../lib/tags';
+import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { X } from 'lucide-react';
+import { errorMessage, fetchBattleLog, fetchPlayer } from '../lib/api';
+import type { Battle, Player } from '../lib/api';
+import { outcome, record, winRate } from '../lib/battles';
+import type { Record3 } from '../lib/battles';
+import { formatNumber, percent } from '../lib/format';
+import { parseDefaultTags, tagToSlug } from '../lib/tags';
+import { FormLine, TagSearch, formatRecord } from '../components';
 
-const PlayerSchema = z.object({
-  tag: z.string(),
-  name: z.string(),
-  trophies: z.number(),
-  bestTrophies: z.number(),
-  wins: z.number(),
-  losses: z.number(),
-  clan: z
-    .object({
-      name: z.string(),
-    })
-    .optional()
-    .nullable(),
-});
-
-type Player = z.infer<typeof PlayerSchema>;
-
-type PlayerResult = {
+type Row = {
   tag: string;
-  data: Player | null;
+  player: Player | null;
+  battles: Battle[] | null;
   error: string | null;
 };
 
+async function loadRow(tag: string): Promise<Row> {
+  const [player, battles] = await Promise.allSettled([
+    fetchPlayer(tag),
+    fetchBattleLog(tag),
+  ]);
+  if (player.status === 'rejected') {
+    return {
+      tag,
+      player: null,
+      battles: null,
+      error: errorMessage(player.reason),
+    };
+  }
+  return {
+    tag,
+    player: player.value,
+    battles: battles.status === 'fulfilled' ? battles.value : null,
+    error: null,
+  };
+}
+
+function lifetimeRate(wins: number, losses: number): number | null {
+  return wins + losses === 0 ? null : (wins / (wins + losses)) * 100;
+}
+
 const ComparePage: React.FC = () => {
-  const [inputTag, setInputTag] = useState('');
   const [tags, setTags] = useState<string[]>([]);
-  const [results, setResults] = useState<PlayerResult[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
+  const myTags = parseDefaultTags();
 
-  const loadMyAccounts = () => {
-    setTags(parseDefaultTags());
-    setResults([]);
+  const addTag = (tag: string) => {
+    setTags((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
   };
 
-  const addTag = () => {
-    const cleanTag = inputTag.trim().toUpperCase();
-    if (!cleanTag) return;
-
-    const formattedTag = cleanTag.startsWith('#') ? cleanTag : `#${cleanTag}`;
-
-    if (!tags.includes(formattedTag)) {
-      setTags([...tags, formattedTag]);
-      setInputTag('');
-    }
+  const removeTag = (tag: string) => {
+    setTags((prev) => prev.filter((t) => t !== tag));
+    setRows((prev) => prev.filter((r) => r.tag !== tag));
   };
 
-  const removeTag = (tagToRemove: string) => {
-    setTags((prev) => prev.filter((t) => t !== tagToRemove));
-    setResults((prev) => prev.filter((r) => r.tag !== tagToRemove));
-  };
-
-  const fetchAllStats = async () => {
+  const fetchAll = async () => {
     setLoading(true);
-
-    const fetchPromises = tags.map(async (tag): Promise<PlayerResult> => {
-      try {
-        const formatted = encodeURIComponent(`%23${tag.slice(1)}`);
-        const base = import.meta.env.VITE_API_BASE ?? '';
-        const res = await fetch(`${base}/api/player/${formatted}`);
-
-        if (!res.ok) {
-          throw new Error(
-            res.status === 404
-              ? 'Player Not Found'
-              : `API Error (${res.status})`,
-          );
-        }
-
-        const rawData = await res.json();
-
-        const validation = PlayerSchema.safeParse(rawData);
-        if (!validation.success) {
-          throw new Error('Invalid Data Format');
-        }
-
-        return { tag, data: validation.data, error: null };
-      } catch (err) {
-        return {
-          tag,
-          data: null,
-          error: err instanceof Error ? err.message : 'Unknown Error',
-        };
-      }
-    });
-
-    const finalResults = await Promise.all(fetchPromises);
-    setResults(finalResults);
+    setRows(await Promise.all(tags.map(loadRow)));
     setLoading(false);
   };
 
   const totals = useMemo(() => {
-    const validResults = results.filter(
-      (r) => r.data !== null && r.error === null,
-    );
-
-    return validResults.reduce(
-      (acc, curr) => {
-        const p = curr.data!;
-        return {
-          wins: acc.wins + p.wins,
-          losses: acc.losses + p.losses,
-          trophies: acc.trophies + p.trophies,
-          count: acc.count + 1,
-        };
-      },
-      { wins: 0, losses: 0, trophies: 0, count: 0 },
-    );
-  }, [results]);
-
-  const globalWinRate = useMemo(() => {
-    const totalGames = totals.wins + totals.losses;
-    if (totalGames === 0) return 0;
-    return (totals.wins / totalGames) * 100;
-  }, [totals]);
+    const ok = rows.filter((r) => r.player !== null);
+    const recent = ok.flatMap((r) => r.battles ?? []);
+    return {
+      count: ok.length,
+      trophies: ok.reduce((a, r) => a + r.player!.trophies, 0),
+      wins: ok.reduce((a, r) => a + r.player!.wins, 0),
+      losses: ok.reduce((a, r) => a + r.player!.losses, 0),
+      recent: recent.length > 0 ? record(recent) : null,
+    };
+  }, [rows]);
 
   return (
-    <div className="p-8 max-w-6xl mx-auto text-slate-200">
-      <h2 className="text-3xl font-black mb-8 text-center uppercase tracking-tighter text-blue-400">
-        Multi-Account Sync
-      </h2>
+    <>
+      <section className="pt-14 sm:pt-20">
+        <h1 className="font-display text-7xl font-black uppercase leading-[0.82] sm:text-8xl">
+          Side by side.
+        </h1>
+        <p className="mb-10 mt-5 max-w-md text-ink-soft">
+          Line up several accounts to compare lifetime numbers with how each one
+          is playing right now.
+        </p>
 
-      {/* Input Section */}
-      <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 mb-8 shadow-lg">
-        <div className="flex gap-2 mb-4">
-          <input
-            className="flex-1 bg-slate-900 border border-slate-700 p-3 rounded-lg outline-none focus:border-blue-500 transition-colors"
-            placeholder="Add Tag (e.g. #P9L2...)"
-            value={inputTag}
-            onChange={(e) => setInputTag(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addTag()}
-          />
-          <button
-            onClick={addTag}
-            className="bg-slate-700 px-6 rounded-lg font-bold hover:bg-slate-600 transition-colors"
-          >
-            Add
-          </button>
-        </div>
+        <TagSearch buttonLabel="Add" onSubmit={addTag} />
 
-        <div className="flex flex-wrap gap-2 min-h-[30px]">
+        <ul className="mt-5 flex min-h-[34px] flex-wrap gap-2">
           {tags.map((t) => (
-            <span
+            <li
               key={t}
-              className="bg-blue-600/10 text-blue-400 border border-blue-500/20 px-3 py-1 rounded-full text-sm flex items-center gap-2 animate-in fade-in zoom-in duration-200"
+              className="flex items-center gap-1 border border-ink py-0.5 pl-2.5 pr-1 font-mono text-sm"
             >
               {t}
               <button
+                type="button"
                 onClick={() => removeTag(t)}
-                className="hover:text-white hover:bg-blue-500/20 rounded-full w-5 h-5 flex items-center justify-center transition-colors"
+                aria-label={`Remove ${t}`}
+                className="p-1 text-ink-soft hover:text-vermilion"
               >
-                ×
+                <X className="h-3.5 w-3.5" />
               </button>
-            </span>
+            </li>
           ))}
           {tags.length === 0 && (
-            <span className="text-slate-500 text-sm italic">
-              No tags added yet...
-            </span>
+            <li className="py-1 text-sm text-ink-faint">No tags added yet.</li>
+          )}
+        </ul>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={fetchAll}
+            disabled={loading || tags.length === 0}
+            className="bg-ink px-5 py-2 font-display text-xl font-bold uppercase text-paper transition-colors hover:bg-cobalt disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {loading ? 'Fetching…' : `Compare ${tags.length || ''} accounts`}
+          </button>
+          {myTags.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setTags(myTags);
+                setRows([]);
+              }}
+              className="border-2 border-ink px-5 py-2 font-display text-xl font-bold uppercase transition-colors hover:bg-ink hover:text-paper"
+            >
+              Load my accounts
+            </button>
           )}
         </div>
+      </section>
 
-        {parseDefaultTags().length > 0 && (
-          <button
-            onClick={loadMyAccounts}
-            className="mt-4 w-full bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm font-bold transition-colors"
-          >
-            Load my accounts
-          </button>
-        )}
-
-        <button
-          onClick={fetchAllStats}
-          disabled={loading || tags.length === 0}
-          className="w-full mt-6 bg-blue-600 p-3 rounded-xl font-black uppercase hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-900/20"
+      {rows.length > 0 && (
+        <div
+          className={`mt-14 overflow-x-auto transition-opacity ${
+            loading ? 'opacity-50' : ''
+          }`}
         >
-          {loading ? 'Fetching Data...' : `Fetch All (${tags.length} Accounts)`}
-        </button>
-      </div>
-
-      {results.length > 0 && (
-        <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-          {/* Global Stats Section */}
-          {totals.count > 0 && (
-            <div className="bg-slate-800 rounded-2xl p-6 md:p-8 border border-slate-700 shadow-2xl flex flex-col md:flex-row items-center gap-8">
-              {/* Changed grid-cols to fit 5 items comfortably on large screens */}
-              <div className="flex-1 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 w-full">
-                <StatBox
-                  label="Overall Win Rate"
-                  value={`${globalWinRate.toFixed(1)}%`}
-                  color={
-                    globalWinRate >= 50 ? 'text-emerald-400' : 'text-yellow-500'
-                  }
-                />
-
-                <StatBox
-                  label="Total Wins"
-                  value={totals.wins}
-                  color="text-emerald-400"
-                />
-                <StatBox
-                  label="Total Losses"
-                  value={totals.losses}
-                  color="text-red-400"
-                />
-                <StatBox
-                  label="Avg Trophies"
-                  value={Math.round(totals.trophies / totals.count)}
-                  color="text-yellow-400"
-                />
-                <StatBox
-                  label="Valid Accounts"
-                  value={`${totals.count}/${results.length}`}
-                  color="text-blue-400"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Individual Results Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {results.map((result) => (
-              <PlayerCard
-                key={result.tag}
-                result={result}
-                onRemove={removeTag}
-              />
-            ))}
-          </div>
+          <table className="w-full min-w-[760px] border-collapse text-left">
+            <thead>
+              <tr className="border-b-2 border-ink">
+                <Th>Player</Th>
+                <Th right>Trophies</Th>
+                <Th right>Best</Th>
+                <Th right>Wins</Th>
+                <Th right>Losses</Th>
+                <Th right>Win rate</Th>
+                <Th>Last 25 battles</Th>
+                <Th>
+                  <span className="sr-only">Remove</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <CompareRow key={r.tag} row={r} onRemove={removeTag} />
+              ))}
+            </tbody>
+            {totals.count > 1 && (
+              <tfoot>
+                <tr className="border-t-2 border-ink align-top">
+                  <td className="py-3 pr-4">
+                    <span className="label">All accounts</span>
+                    <span className="mt-1 block text-[13px] text-ink-soft">
+                      {totals.count} of {rows.length} loaded
+                    </span>
+                  </td>
+                  <Num>
+                    {formatNumber(Math.round(totals.trophies / totals.count))}
+                    <span className="mt-1 block font-sans text-[13px] font-normal text-ink-soft">
+                      average
+                    </span>
+                  </Num>
+                  <Num />
+                  <Num>{formatNumber(totals.wins)}</Num>
+                  <Num>{formatNumber(totals.losses)}</Num>
+                  <Num>
+                    {percent(lifetimeRate(totals.wins, totals.losses), 1)}
+                  </Num>
+                  <td className="py-3 pr-4">
+                    {totals.recent && <RecentSummary record={totals.recent} />}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            )}
+          </table>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
-const StatBox = ({
-  label,
-  value,
-  color,
+const Th = ({
+  children,
+  right = false,
 }: {
-  label: string;
-  value: string | number;
-  color: string;
+  children: React.ReactNode;
+  right?: boolean;
 }) => (
-  <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
-    <p className="text-slate-500 text-[10px] uppercase font-black tracking-widest mb-1">
-      {label}
-    </p>
-    <p className={`text-2xl font-black ${color}`}>{value}</p>
-  </div>
+  <th
+    scope="col"
+    className={`label pb-2 pr-4 font-bold ${right ? 'text-right' : ''}`}
+  >
+    {children}
+  </th>
 );
 
-const PlayerCard = ({
-  result,
+const Num = ({ children }: { children?: React.ReactNode }) => (
+  <td className="py-3 pr-4 text-right font-display text-2xl font-bold tabular-nums leading-none">
+    {children}
+  </td>
+);
+
+const RecentSummary = ({ record: r }: { record: Record3 }) => (
+  <span className="text-sm">
+    <span className="font-semibold">{formatRecord(r)}</span>{' '}
+    <span className="text-ink-soft">({percent(winRate(r))})</span>
+  </span>
+);
+
+const CompareRow = ({
+  row,
   onRemove,
 }: {
-  result: PlayerResult;
+  row: Row;
   onRemove: (tag: string) => void;
 }) => {
-  const { data, error, tag } = result;
+  const { player: p, battles, tag } = row;
+  const remove = (
+    <td className="py-3 text-right">
+      <button
+        type="button"
+        onClick={() => onRemove(tag)}
+        aria-label={`Remove ${tag}`}
+        className="p-1 text-ink-faint hover:text-vermilion"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </td>
+  );
 
-  const totalGames = data ? data.wins + data.losses : 0;
-  const winRate = totalGames > 0 && data ? (data.wins / totalGames) * 100 : 0;
+  if (!p) {
+    return (
+      <tr className="border-b border-rule">
+        <td colSpan={7} className="py-3 pr-4">
+          <span className="font-mono text-sm">{tag}</span>
+          <span className="ml-3 border-l-4 border-vermilion pl-2 text-sm text-ink-soft">
+            {row.error}
+          </span>
+        </td>
+        {remove}
+      </tr>
+    );
+  }
 
   return (
-    <div
-      className={`relative p-5 rounded-xl border transition-all duration-300 group ${
-        error
-          ? 'bg-red-900/5 border-red-500/30'
-          : 'bg-slate-800 border-slate-700 hover:border-blue-500/50'
-      }`}
-    >
-      <div className="flex justify-between items-center">
-        {/* Left Side: Name and Tag */}
-        <div>
-          {data ? (
-            <>
-              <h4 className="text-xl font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
-                {data.name}
-              </h4>
-              <p className="text-slate-500 font-mono text-xs">{tag}</p>
-              {data.clan && (
-                <p className="text-slate-400 text-xs mt-1">
-                  🛡️ {data.clan.name}
-                </p>
-              )}
-            </>
-          ) : (
-            <>
-              <h4 className="text-xl font-bold text-slate-400">Unknown</h4>
-              <p className="text-red-400 font-mono text-xs">{tag}</p>
-            </>
-          )}
-
-          {error && (
-            <div className="mt-2 inline-flex items-center gap-2 bg-red-500/10 text-red-400 px-3 py-1 rounded text-xs font-bold border border-red-500/20">
-              <span>⚠️ {error}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Right Side: Stats & Actions */}
-        <div className="flex items-center gap-4">
-          {/* Wins & Losses */}
-          {!error && data && (
-            <div className="text-right hidden sm:block mr-2">
-              <p className="text-emerald-400 text-sm font-bold">
-                {data.wins} W
-              </p>
-              <p className="text-red-400 text-sm font-bold">{data.losses} L</p>
-            </div>
-          )}
-
-          {/* Win Rate Percentage */}
-          {!error && (
-            <div
-              className={`text-center ${
-                winRate >= 50 ? 'text-emerald-400' : 'text-yellow-500'
-              }`}
-            >
-              <span className="text-2xl font-black">{winRate.toFixed(1)}%</span>
-              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
-                Win Rate
-              </p>
-            </div>
-          )}
-
-          {/* Remove Button */}
-          <button
-            onClick={() => onRemove(tag)}
-            className="text-slate-600 hover:text-red-400 hover:bg-slate-700/50 w-8 h-8 rounded-full flex items-center justify-center transition-colors ml-2"
-            title="Remove Tag"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-    </div>
+    <tr className="border-b border-rule align-top">
+      <td className="py-3 pr-4">
+        <Link
+          to={`/player/${tagToSlug(tag)}`}
+          className="font-display text-2xl font-bold uppercase leading-none underline decoration-rule decoration-2 underline-offset-4 hover:decoration-cobalt"
+        >
+          {p.name}
+        </Link>
+        <span className="mt-1 block text-[13px] text-ink-soft">
+          <span className="font-mono">{tag}</span>
+          {p.clan && ` · ${p.clan.name}`}
+        </span>
+      </td>
+      <Num>{formatNumber(p.trophies)}</Num>
+      <Num>{formatNumber(p.bestTrophies)}</Num>
+      <Num>{formatNumber(p.wins)}</Num>
+      <Num>{formatNumber(p.losses)}</Num>
+      <Num>{percent(lifetimeRate(p.wins, p.losses), 1)}</Num>
+      <td className="py-3 pr-4">
+        {battles && battles.length > 0 ? (
+          <>
+            <FormLine
+              outcomes={[...battles].reverse().map(outcome)}
+              size="sm"
+            />
+            <RecentSummary record={record(battles)} />
+          </>
+        ) : (
+          <span className="text-sm text-ink-faint">
+            {battles ? 'No battles' : 'Unavailable'}
+          </span>
+        )}
+      </td>
+      {remove}
+    </tr>
   );
 };
 

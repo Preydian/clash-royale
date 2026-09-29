@@ -10,6 +10,7 @@
     "outDir": "dist",
     "types": ["node"],
     "noErrorTruncation": true,
+    "skipLibCheck": true,
     // "noUncheckedIndexedAccess": true,
     "jsx": "react-jsx"
   },

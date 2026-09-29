@@ -1,30 +1,24 @@
 // server/server.js
 import express from 'express';
-import axios from 'axios';
 import cors from 'cors';
 import 'dotenv/config';
+import { apiBase, createClashHandler } from '../api/_lib/clash.js';
+import {
+  createHistoryHandler,
+  createSyncHandler,
+} from '../api/_lib/history.js';
 
 const app = express();
 app.use(cors()); // Allows your React app to talk to this server
 
-const PORT = 5000;
-const CLASH_API_BASE = 'https://api.clashroyale.com/v1';
+const PORT = process.env.PORT ?? 5000;
+// Unlike Vercel, a local machine can have its own IP whitelisted on the key.
+const base = apiBase('https://api.clashroyale.com/v1');
 
-app.get('/api/player/:tag', async (req, res) => {
-  try {
-    const playerTag = req.params.tag; // e.g. %23P9L2
-    const response = await axios.get(`${CLASH_API_BASE}/players/${playerTag}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.CLASH_KEY}`,
-        Accept: 'application/json',
-      },
-    });
-    res.json(response.data);
-  } catch (error) {
-    const status = error.response?.status || 500;
-    console.error('Clash API error', status, error.response?.data ?? error.message);
-    res.status(status).json({ error: 'Failed to fetch', reason: error.response?.data });
-  }
-});
+app.get('/api/clash', createClashHandler(base));
+app.get('/api/history', createHistoryHandler(base));
+app.get('/api/sync', createSyncHandler(base));
 
-app.listen(PORT, () => console.log(`Proxy running on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`Proxy running on http://localhost:${PORT}`),
+);
