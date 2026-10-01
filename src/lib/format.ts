@@ -4,6 +4,9 @@ export function formatNumber(n: number): string {
   return numberFormat.format(n);
 }
 
+// Stands in for a number there is no data for.
+const NO_VALUE = '—';
+
 // Typographic minus, so signed numbers line up and read as numbers.
 export function signed(n: number, digits = 0): string {
   const abs = Math.abs(n).toFixed(digits);
@@ -12,7 +15,15 @@ export function signed(n: number, digits = 0): string {
 }
 
 export function percent(n: number | null, digits = 0): string {
-  return n === null ? '—' : `${n.toFixed(digits)}%`;
+  return n === null ? NO_VALUE : `${n.toFixed(digits)}%`;
+}
+
+/**
+ * An elixir amount to one decimal, e.g. "2.4". `leakGap` in battles.ts
+ * compares leaks at this same precision.
+ */
+export function elixir(n: number | null): string {
+  return n === null ? NO_VALUE : n.toFixed(1);
 }
 
 export function timeAgo(date: Date): string {

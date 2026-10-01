@@ -10,7 +10,6 @@ import jsdoc from 'eslint-plugin-jsdoc';
 export default [{
 ignores: [
   "**/__generated__/",
-  "src/test/",
   "**/scripts/",
   "**/node_modules",
   "**/dist",
@@ -101,5 +100,16 @@ rules: {
   // }],
 
   "no-console": "warn",
+},
+}, {
+// Tests may import dev-only tooling such as vitest.
+files: ["src/test/**/*.ts", "src/test/**/*.tsx"],
+
+rules: {
+  "import/no-extraneous-dependencies": ["error", {
+      devDependencies: true,
+      optionalDependencies: false,
+      peerDependencies: false,
+  }],
 },
 }];

@@ -10,12 +10,15 @@ import {
   byDay,
   deckStats,
   games,
+  leakGap,
+  leaked,
   levelGap,
   matchups,
   me,
   modeGroup,
   modeLabel,
   netTrophies,
+  opponentLeaked,
   outcome,
   record,
   streak,
@@ -23,8 +26,9 @@ import {
   trophySeries,
   winRate,
 } from '../lib/battles';
-import { percent, signed, timeAgo } from '../lib/format';
+import { elixir, percent, signed, timeAgo } from '../lib/format';
 import { CardArt, Deck } from './Deck';
+import { ElixirLeaked } from './ElixirLeaked';
 import { Section, Stat, StatGrid } from './Layout';
 import { FormLine, RecordBar, ResultMark, formatRecord } from './Results';
 import { TrophyChart } from './TrophyChart';
@@ -138,6 +142,7 @@ export const BattleAnalysis = ({
             <TrophySection battles={shown} />
           </div>
 
+          <ElixirLeaked battles={shown} />
           {showDays && <DayByDay battles={shown} />}
           <Decks battles={shown} />
           <Matchups battles={shown} />
@@ -464,6 +469,12 @@ const BattleRow = ({
   const them = battle.opponent[0];
   const result = outcome(battle);
   const gap = levelGap(battle);
+  const leak = leaked(battle);
+  const notes = [
+    gap !== null &&
+      `Level gap ${signed(gap, 1)} (your average card level minus theirs)`,
+    leakComparison(battle),
+  ].filter((note): note is string => Boolean(note));
 
   return (
     <li className="border-b border-rule">
@@ -482,8 +493,17 @@ const BattleRow = ({
               {them.clan ? ` · ${them.clan.name}` : ''}
             </span>
           </span>
-          <span className="text-right font-mono text-sm tabular-nums">
-            {you.trophyChange !== undefined ? signed(you.trophyChange) : ''}
+          <span className="text-right tabular-nums">
+            {you.trophyChange !== undefined && (
+              <span className="block font-mono text-sm">
+                {signed(you.trophyChange)}
+              </span>
+            )}
+            {leak !== null && (
+              <span className="block whitespace-nowrap text-[13px] text-ink-soft">
+                {elixir(leak)} leaked
+              </span>
+            )}
           </span>
           <span className="hidden md:block">
             <Deck cards={them.cards} compact />
@@ -515,10 +535,12 @@ const BattleRow = ({
               leaked={p.elixirLeaked}
             />
           ))}
-          {gap !== null && (
-            <p className="text-sm text-ink-soft md:col-span-2">
-              Level gap {signed(gap, 1)} (your average card level minus theirs)
-            </p>
+          {notes.length > 0 && (
+            <div className="space-y-1 text-sm text-ink-soft md:col-span-2">
+              {notes.map((note) => (
+                <p key={note}>{note}</p>
+              ))}
+            </div>
           )}
         </div>
       </details>
@@ -526,12 +548,32 @@ const BattleRow = ({
   );
 };
 
+/** Your elixir leaked against theirs, when the battle reported both. */
+function leakComparison(battle: Battle): string | null {
+  const ours = leaked(battle);
+  const theirs = opponentLeaked(battle);
+  const gap = leakGap(battle);
+  if (ours === null || theirs === null || gap === null) return null;
+
+  const verdict =
+    gap === 0
+      ? 'the same'
+      : `${elixir(Math.abs(gap))} ${gap < 0 ? 'less' : 'more'}`;
+  // An average of two opponents matches neither one's own number, so name it.
+  const reporting = battle.opponent.filter((p) => p.elixirLeaked !== undefined);
+  const them = reporting.length > 1 ? 'their average of' : 'their';
+
+  return `You leaked ${elixir(ours)} elixir to ${them} ${elixir(
+    theirs,
+  )} (${verdict})`;
+}
+
 const Side = ({
   label,
   name,
   cards,
   commonMax,
-  leaked,
+  leaked: leak,
 }: {
   label: string;
   name: string;
@@ -540,6 +582,10 @@ const Side = ({
   leaked?: number;
 }) => {
   const avg = averageElixir(cards);
+  const meta = [
+    avg !== null && `${avg.toFixed(1)} avg elixir`,
+    leak !== undefined && `${elixir(leak)} leaked`,
+  ].filter(Boolean);
   return (
     <div>
       <p className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm">
@@ -550,10 +596,7 @@ const Side = ({
         />
         <span className="label">{label}</span>
         <span className="font-semibold">{name}</span>
-        <span className="text-ink-soft">
-          {avg !== null && `${avg.toFixed(1)} avg elixir`}
-          {leaked !== undefined && ` · ${leaked.toFixed(1)} leaked`}
-        </span>
+        <span className="text-ink-soft">{meta.join(' · ')}</span>
       </p>
       <Deck cards={cards} commonMax={commonMax} />
     </div>
