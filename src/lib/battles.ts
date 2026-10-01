@@ -161,10 +161,7 @@ export function levelGap(battle: Battle): number | null {
 }
 
 export function averageLevelGap(battles: Battle[]): number | null {
-  const gaps = battles.map(levelGap).filter((g): g is number => g !== null);
-  return gaps.length === 0
-    ? null
-    : gaps.reduce((a, g) => a + g, 0) / gaps.length;
+  return mean(battles.map(levelGap).filter((g): g is number => g !== null));
 }
 
 export type DeckStats = {
@@ -238,11 +235,9 @@ export function matchups(battles: Battle[]): Matchup[] {
 }
 
 export function averageElixir(cards: Card[]): number | null {
-  const costs = cards
-    .map((c) => c.elixirCost)
-    .filter((c): c is number => c !== undefined);
-  if (costs.length === 0) return null;
-  return costs.reduce((a, c) => a + c, 0) / costs.length;
+  return mean(
+    cards.map((c) => c.elixirCost).filter((c): c is number => c !== undefined),
+  );
 }
 
 /** Cheapest four cards: what it costs to cycle back to a card. */
@@ -253,6 +248,105 @@ export function cycleCost(cards: Card[]): number | null {
     .sort((a, z) => a - z);
   if (costs.length < 8) return null;
   return costs.slice(0, 4).reduce((a, c) => a + c, 0);
+}
+
+/**
+ * Elixir you generated at a full bar and so wasted, or null when the battle
+ * didn't report it.
+ */
+export function leaked(battle: Battle): number | null {
+  return me(battle).elixirLeaked ?? null;
+}
+
+/**
+ * What the other side leaked. In 2v2 every player has their own bar, so this
+ * is the opponents' average: one player's worth, comparable to your own.
+ * Null for a boat battle, where the other side is defences, not a player.
+ */
+export function opponentLeaked(battle: Battle): number | null {
+  if (battle.type === 'boatBattle') return null;
+  return mean(
+    battle.opponent
+      .map((p) => p.elixirLeaked)
+      .filter((l): l is number => l !== undefined),
+  );
+}
+
+// Leaks are shown to one decimal: see `elixir` in format.ts.
+function tenths(n: number): number {
+  return Number(n.toFixed(1));
+}
+
+/**
+ * Your leak minus theirs, or null unless both sides reported one. Compared at
+ * the one decimal that is shown, so a battle row and the totals can't disagree
+ * about who leaked less.
+ */
+export function leakGap(battle: Battle): number | null {
+  const ours = leaked(battle);
+  const theirs = opponentLeaked(battle);
+  if (ours === null || theirs === null) return null;
+  return tenths(tenths(ours) - tenths(theirs));
+}
+
+/** An average with the number of battles behind it. */
+export type LeakAverage = { average: number | null; battles: number };
+
+export type LeakStats = {
+  /** Battles that reported your leak: the sample behind `average`. */
+  battles: number;
+  /** Your elixir leaked per battle. */
+  average: number;
+  /** The other side's, over the `compared` battles. */
+  opponentAverage: number | null;
+  inWins: LeakAverage;
+  inLosses: LeakAverage;
+  /** How many of the `compared` battles you leaked less in. */
+  leakedLess: number;
+  /** Battles where both sides reported a leak. */
+  compared: number;
+  worst: { battle: Battle; leaked: number };
+};
+
+/** Your elixir leaks across a list of battles, or null if none reported one. */
+export function leakStats(battles: Battle[]): LeakStats | null {
+  const reported = battles.flatMap((battle) => {
+    const ours = leaked(battle);
+    return ours === null ? [] : [{ battle, ours }];
+  });
+  const average = mean(reported.map((r) => r.ours));
+  if (average === null) return null;
+
+  const averageIn = (result: Outcome): LeakAverage => {
+    const leaks = reported
+      .filter((r) => outcome(r.battle) === result)
+      .map((r) => r.ours);
+    return { average: mean(leaks), battles: leaks.length };
+  };
+  const gaps = reported
+    .map((r) => leakGap(r.battle))
+    .filter((g): g is number => g !== null);
+  const theirs = reported
+    .map((r) => opponentLeaked(r.battle))
+    .filter((l): l is number => l !== null);
+  // On a tie the earlier entry wins, which newest-first is the latest battle.
+  const worst = reported.reduce((a, r) => (r.ours > a.ours ? r : a));
+
+  return {
+    battles: reported.length,
+    average,
+    opponentAverage: mean(theirs),
+    inWins: averageIn('win'),
+    inLosses: averageIn('loss'),
+    leakedLess: gaps.filter((g) => g < 0).length,
+    compared: gaps.length,
+    worst: { battle: worst.battle, leaked: worst.ours },
+  };
+}
+
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((a, v) => a + v, 0) / values.length;
 }
 
 /** Union of two newest-first battle lists, without duplicates. */
